@@ -136,7 +136,7 @@ impl TileSplit {
         let chunk_text = buffer.trim().to_string();
         if chunk_text.len() >= self.config.min_chunk_size {
             chunks.push(Chunk {
-                text: chunk_text, start_char: buffer_start,
+                text: chunk_text.clone(), start_char: buffer_start,
                 end_char: buffer_start + buffer.len(),
                 token_estimate: buffer_tokens,
                 chunk_type: self.detect_type(&chunk_text),
@@ -169,7 +169,7 @@ impl TileSplit {
             };
             let chunk_text = text[pos..end].trim().to_string();
             chunks.push(Chunk {
-                text: chunk_text, start_char: pos, end_char,
+                text: chunk_text.clone(), start_char: pos, end_char: end,
                 token_estimate: Self::estimate_tokens(&chunk_text, self.config.chars_per_token),
                 chunk_type: self.detect_type(&chunk_text), metadata: HashMap::new()
             });
@@ -187,10 +187,9 @@ impl TileSplit {
             if trimmed.len() >= self.config.min_chunk_size {
                 let end = pos + part.len();
                 chunks.push(Chunk {
-                    text: trimmed.to_string(), start_char: pos, end_char,
+                    text: trimmed.to_string(), start_char: pos, end_char: end,
                     token_estimate: Self::estimate_tokens(trimmed, self.config.chars_per_token),
-                    chunk_type: self.detect_type(trimmed), metadata: HashMap::new()
-                        ("delimiter".into(), delimiter.to_string())
+                    chunk_type: self.detect_type(trimmed), metadata: HashMap::from([("delimiter".into(), delimiter.to_string())])
                 });
             }
             pos += part.len() + delimiter.len();
@@ -202,7 +201,7 @@ impl TileSplit {
     pub fn split_code(&self, code: &str) -> Vec<Chunk> {
         let mut chunks = Vec::new();
         let mut pos = 0;
-        let mut brace_depth = 0;
+        let mut brace_depth: usize = 0;
         let mut block_start = 0;
         let mut in_string = false;
         let mut string_char = ' ';
@@ -221,7 +220,7 @@ impl TileSplit {
                         let block = code[block_start..=i].trim().to_string();
                         if block.len() >= self.config.min_chunk_size {
                             chunks.push(Chunk {
-                                text: block, start_char: block_start, end_char: i + 1,
+                                text: block.clone(), start_char: block_start, end_char: i + 1,
                                 token_estimate: Self::estimate_tokens(&block, self.config.chars_per_token),
                                 chunk_type: ChunkType::Code, metadata: HashMap::new()
                             });
@@ -358,7 +357,7 @@ impl TileSplit {
         let chunk_tokens: Vec<usize> = chunks.iter().map(|c| c.token_estimate).collect();
         let chunk_chars: Vec<usize> = chunks.iter().map(|c| c.text.len()).collect();
         SplitStats {
-            input_chars: text.len(), input_tokens: input_tokens,
+            input_chars: text.len(), input_tokens_est: input_tokens,
             chunks: chunks.len(),
             avg_chunk_tokens: if chunk_tokens.is_empty() { 0.0 } else { chunk_tokens.iter().sum::<usize>() as f64 / chunks.len() as f64 },
             avg_chunk_chars: if chunk_chars.is_empty() { 0.0 } else { chunk_chars.iter().sum::<usize>() as f64 / chunks.len() as f64 },
@@ -387,6 +386,8 @@ mod tests {
         let mut config = SplitConfig::default();
         config.max_tokens = 50;
         config.code_aware = true;
+        config.chars_per_token = 1.0;
+        config.min_chunk_size = 5;
         let splitter = TileSplit::new(config);
         let text = "Some text.\n\n```python\ndef foo():\n    return 42\n```\n\nMore text.";
         let chunks = splitter.split(text);
@@ -403,7 +404,9 @@ mod tests {
 
     #[test]
     fn test_split_code() {
-        let splitter = TileSplit::new(SplitConfig::default());
+        let mut config = SplitConfig::default();
+        config.min_chunk_size = 10;
+        let splitter = TileSplit::new(config);
         let code = "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n\nfn mul(a: i32, b: i32) -> i32 {\n    a * b\n}";
         let chunks = splitter.split_code(code);
         assert!(chunks.len() >= 2);
@@ -413,9 +416,9 @@ mod tests {
     #[test]
     fn test_stats() {
         let splitter = TileSplit::new(SplitConfig::default());
-        let text = "Hello world. " * 100;
+        let text = "Hello world. ".repeat(100);
         let chunks = splitter.split(&text);
-        let stats = splitter.stats(text, &chunks);
+        let stats = splitter.stats(&text, &chunks);
         assert!(stats.chunks >= 1);
         assert!(stats.avg_chunk_chars > 0.0);
     }
